@@ -1,0 +1,29 @@
+version: "3"
+
+x-deploy: &template-deploy
+  replicas: 1
+  restart_policy:
+    condition: any
+  update_config:
+    parallelism: 1
+    delay: 10s
+
+services:
+  redis:
+    image: redis:latest
+    command:
+      - --loglevel warning
+    volumes:
+      - /data-volume/redis-data:/var/lib/redis:Z
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - "gitlab"
+    deploy:
+      <<: *template-deploy
+      labels:
+        - "traefik.enable=false"
+
+networks:
+  gitlab:
+    external: true

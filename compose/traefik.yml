@@ -1,0 +1,76 @@
+version: "3.7"
+
+x-deploy: &template-deploy # replicas: 1
+  mode: global
+  restart_policy:
+    condition: any
+  update_config:
+    parallelism: 1
+    delay: 10s
+
+services:
+  traefik:
+    image: traefik:v2.9
+    deploy:
+      <<: *template-deploy
+      mode: global
+      restart_policy:
+        condition: on-failure
+      labels:
+        # Dashboard traefik
+        - "traefik.enable=true"
+        - "traefik.http.services.justAdummyService.loadbalancer.server.port=1337"
+        - "traefik.http.routers.traefik-http.tls=true"
+        - "traefik.http.routers.traefik-http.rule=(Host(`{{ traefik_domain }}`) || Host(`{{ traefik_alt_domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`)))"
+        - "traefik.http.routers.traefik-http.service=api@internal"
+        # Autenticacao Dashboard
+        #- "traefik.http.routers.traefik.middlewares=traefik-auth"
+        #- "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$apr1$$8V7Jq0jU$$LOR60p2l7SJq4XZZyqW2w0"
+        # Redirect all HTTP to HTTPS permanently
+        - "traefik.http.routers.redirs.rule=hostregexp(`{host:.+}`)"
+        - "traefik.http.routers.redirs.entrypoints=web"
+        - "traefik.http.routers.redirs.middlewares=redirect-to-https"
+        - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "23:23"
+    networks:
+      - "gitlab"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data-volume/certs-data:/traefik/config/certs:ro
+      - ../traefik/config.yml:/etc/traefik/dynamic/certs-traefik.yaml
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      #- /data-volume/certs:/etc/certs
+    command:
+      # Skip Certificado
+      - "--accesslog.fields.headers.names.User-Agent=keep"
+      - "--serversTransport.insecureSkipVerify=true"
+      # ENABLE API
+      - "--api=true"
+      - "--api.insecure=true"
+      - "--log.level=ERROR"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      # ENABLE DOCKER SWARM
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      # ENDPINTS
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.gitlab-ssh.address=:23"
+      # Prometheus metrics
+      ## Enable prometheus metrics
+      # - "--metrics.prometheus=true"
+      ## Create a manual router instead of the default one.
+      # - "--entryPoints.metrics.address=:8080"
+      # - "--metrics.prometheus.addrouterslabels=true"
+      # - "--metrics.prometheus.entryPoint=metrics"
+      # - "--metrics.prometheus.addServicesLabels=true"
+      # - "--metrics.prometheus.addEntryPointsLabels=true"
+
+networks:
+  gitlab:
+    external: true

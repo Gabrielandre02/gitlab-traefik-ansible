@@ -1,0 +1,9 @@
+- hosts: gitlab_hosts
+  become: true
+  vars_files:
+    - ../vars/main.yml
+  vars:
+    repo_root: "{{ playbook_dir }}/../.."
+  roles:
+    - docker
+    - deploy_configs

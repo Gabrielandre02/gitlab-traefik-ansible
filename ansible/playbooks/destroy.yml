@@ -1,0 +1,11 @@
+- hosts: vagrant_host
+  gather_facts: true
+  vars_files:
+    - ../vars/main.yml
+  vars:
+    vagrant_dir: "{{ playbook_dir }}/../../vagrant"
+  tasks:
+    - name: Destroy Vagrant VM
+      ansible.builtin.include_role:
+        name: vagrant
+        tasks_from: destroy

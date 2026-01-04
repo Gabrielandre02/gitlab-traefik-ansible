@@ -1,0 +1,40 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = ENV.fetch("VAGRANT_BOX", "bento/ubuntu-22.04")
+
+  machine_name = ENV.fetch("VAGRANT_MACHINE_NAME", "gitlab-traefik")
+  config.vm.define machine_name do |vm|
+    vm.vm.hostname = ENV.fetch("VAGRANT_VM_NAME", "gitlab-traefik")
+
+    private_enabled = ENV.fetch("VAGRANT_PRIVATE_NETWORK_ENABLED", "1") == "1"
+    private_type = ENV.fetch("VAGRANT_PRIVATE_NETWORK_TYPE", "static")
+    private_ip = ENV.fetch("VAGRANT_IP", "192.168.56.10")
+
+    if private_enabled
+      if private_type == "dhcp"
+        vm.vm.network "private_network", type: "dhcp"
+      else
+        vm.vm.network "private_network", ip: private_ip
+      end
+    end
+
+    provider = ENV.fetch("VAGRANT_PROVIDER", "virtualbox")
+    vm.vm.provider provider do |p|
+      if provider == "virtualbox"
+        p.name = vm.vm.hostname
+        p.memory = ENV.fetch("VAGRANT_MEMORY", "4096")
+        p.cpus = ENV.fetch("VAGRANT_CPUS", "2")
+      elsif provider == "parallels"
+        p.name = vm.vm.hostname if p.respond_to?(:name)
+        p.memory = ENV.fetch("VAGRANT_MEMORY", "4096")
+        p.cpus = ENV.fetch("VAGRANT_CPUS", "2")
+      elsif provider == "vmware_desktop"
+        p.vmx["displayName"] = vm.vm.hostname
+        p.vmx["memsize"] = ENV.fetch("VAGRANT_MEMORY", "4096")
+        p.vmx["numvcpus"] = ENV.fetch("VAGRANT_CPUS", "2")
+      else
+        p.memory = ENV.fetch("VAGRANT_MEMORY", "4096") if p.respond_to?(:memory)
+        p.cpus = ENV.fetch("VAGRANT_CPUS", "2") if p.respond_to?(:cpus)
+      end
+    end
+  end
+end

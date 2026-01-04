@@ -1,0 +1,73 @@
+# Domain and cert configuration
+
+gitlab_domain: gitlab.example.com
+traefik_domain: traefik.example.com
+traefik_alt_domain: traefik.local
+
+traefik_cert_file: /traefik/config/certs/traefik_full.crt
+traefik_key_file: /traefik/config/certs/traefik.key
+
+
+# GitLab settings
+
+gitlab_root_password: change-me
+gitlab_root_email: gitlab@example.com
+gitlab_email: gitlab@example.com
+gitlab_runner_token: change-me
+
+# SMTP/LDAP settings
+
+smtp_domain: smtp.example.com
+smtp_host: smtp.example.com
+ldap_bind_dn: EXAMPLE\\gitlab
+ldap_pass: change-me
+ldap_base: DC=example,DC=local
+ldap_user_filter: "(&(objectClass=user)(memberOf=CN=Gitlab,OU=Groups,DC=example,DC=local))"
+
+# Deploy paths
+
+deploy_root: /opt/gitlab-traefik
+remove_stacks_on_deploy: false
+
+swarm_networks:
+  - gitlab
+
+# Docker install
+
+docker_packages:
+  - docker.io
+
+docker_service_name: docker
+
+# Vagrant
+
+vagrant_vm_name: gitlab-traefik
+vagrant_machine_name: gitlab-traefik
+vagrant_remove_state: true
+vagrant_memory: 4096
+vagrant_cpus: 2
+vagrant_ip: 192.168.56.10
+
+vagrant_box_by_arch:
+  x86_64: "bento/ubuntu-22.04"
+  amd64: "bento/ubuntu-22.04"
+  arm64: "bento/ubuntu-22.04"
+  aarch64: "bento/ubuntu-22.04"
+
+vagrant_provider_by_arch:
+  x86_64: virtualbox
+  amd64: virtualbox
+  arm64: virtualbox
+  aarch64: virtualbox
+
+vagrant_private_network_enabled_by_arch:
+  x86_64: true
+  amd64: true
+  arm64: false
+  aarch64: false
+
+vagrant_private_network_type_by_arch:
+  x86_64: static
+  amd64: static
+  arm64: dhcp
+  aarch64: dhcp

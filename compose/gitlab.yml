@@ -1,0 +1,60 @@
+version: "3"
+
+x-deploy: &template-deploy
+  replicas: 1
+  restart_policy:
+    condition: any
+  update_config:
+    parallelism: 1
+    delay: 10s
+
+services:
+  gitlab:
+    image: sameersbn/gitlab:17.5.1
+    depends_on:
+      - redis
+      - postgresql
+    volumes:
+      # Diretorio de Arquivos Gitlab
+      - /data-volume/gitlab-data:/home/git/data:Z
+      # Diretorio de BKP
+      - /data-volume/bkp_git:/home/git/data/backups
+      # Diretorio de Certificados
+      - /data-volume/certs-data:/certs
+      # Diretorio de LOGS
+      - /data-volume/logs:/var/log/gitlab/gitlab
+    env_file:
+      - ../envs/gitlab.env
+    # healthcheck:
+    #   test: ["CMD", "/usr/local/sbin/healthcheck"]
+    #   interval: 5m
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 5m
+    networks:
+      - "gitlab"
+    deploy:
+      <<: *template-deploy
+      placement:
+        constraints:
+          - node.labels.frontend == gitlab
+      labels:
+        - "traefik.enable=true"
+          # HTTP
+        - "traefik.http.routers.gitlab-http.entrypoints=web"
+        - "traefik.http.routers.gitlab-http.rule=Host(`{{ gitlab_domain }}`)"
+        - "traefik.http.routers.gitlab-http.middlewares=redirect-to-https"
+        # HTTPS
+        - "traefik.http.routers.gitlab-https.entrypoints=websecure"
+        - "traefik.http.routers.gitlab-https.rule=Host(`{{ gitlab_domain }}`)"
+        - "traefik.http.routers.gitlab-https.tls=true"
+        # Can't filter TCP traffic on SNI, see link below
+        # https://community.containo.us/t/routing-ssh-traffic-with-traefik-v2/717/6
+        - "traefik.tcp.routers.gitlab-ssh.rule=HostSNI(`*`)"
+        - "traefik.tcp.routers.gitlab-ssh.entrypoints=gitlab-ssh"
+        - "traefik.tcp.services.gitlab-ssh.loadbalancer.server.port=22"
+        - "traefik.http.services.gitlab-gitlab.loadbalancer.server.port=80"
+
+networks:
+  gitlab:
+    external: true

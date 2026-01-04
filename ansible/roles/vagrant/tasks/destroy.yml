@@ -1,0 +1,55 @@
+- name: Select Vagrant provider for current architecture
+  ansible.builtin.set_fact:
+    vagrant_arch: "{{ ansible_facts['architecture'] }}"
+    vagrant_provider_effective: "{{ vagrant_provider | default(vagrant_provider_by_arch[ansible_facts['architecture']]) }}"
+
+- name: Validate Vagrant provider for architecture
+  ansible.builtin.assert:
+    that:
+      - vagrant_provider_effective is defined
+    fail_msg: "No Vagrant provider configured for {{ vagrant_arch }}. Update ansible/vars/main.yml."
+
+- name: Destroy Vagrant VM
+  ansible.builtin.command:
+    cmd: "vagrant destroy -f {{ vagrant_machine_name }}"
+    chdir: "{{ vagrant_dir }}"
+  register: vagrant_destroy
+  failed_when: vagrant_destroy.rc != 0 and ('not created' not in (vagrant_destroy.stderr | lower))
+
+- name: Check existing VirtualBox VMs
+  ansible.builtin.command:
+    cmd: VBoxManage list vms
+  register: vbox_vms
+  changed_when: false
+  when: vagrant_provider_effective == 'virtualbox'
+
+- name: Check running VirtualBox VMs
+  ansible.builtin.command:
+    cmd: VBoxManage list runningvms
+  register: vbox_running
+  changed_when: false
+  when: vagrant_provider_effective == 'virtualbox'
+
+- name: Power off running VM if it is locked
+  ansible.builtin.command:
+    cmd: "VBoxManage controlvm {{ vagrant_machine_name }} poweroff"
+  when:
+    - vagrant_provider_effective == 'virtualbox'
+    - vbox_running.stdout is search('\"' ~ vagrant_machine_name ~ '\"')
+
+- name: Remove remaining VirtualBox VM with same name
+  ansible.builtin.command:
+    cmd: "VBoxManage unregistervm {{ vagrant_machine_name }} --delete"
+  when:
+    - vagrant_provider_effective == 'virtualbox'
+    - vbox_vms.stdout is search('\"' ~ vagrant_machine_name ~ '\"')
+  register: vbox_unregister
+  retries: 5
+  delay: 3
+  until: vbox_unregister.rc == 0
+
+- name: Remove local Vagrant state
+  ansible.builtin.file:
+    path: "{{ vagrant_dir }}/.vagrant"
+    state: absent
+  when: vagrant_remove_state | bool

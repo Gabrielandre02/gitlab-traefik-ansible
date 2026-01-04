@@ -1,0 +1,9 @@
+- hosts: vagrant_host
+  gather_facts: true
+  vars_files:
+    - ../vars/main.yml
+  vars:
+    vagrant_dir: "{{ playbook_dir }}/../../vagrant"
+    inventory_path: "{{ playbook_dir }}/../inventories/hosts.yml"
+  roles:
+    - vagrant

@@ -1,0 +1,95 @@
+- name: Ensure deploy directories exist
+  ansible.builtin.file:
+    path: "{{ deploy_root }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - config
+    - envs
+    - gitlab_runner
+    - postgres
+    - traefik
+    - compose
+
+- name: Ensure data directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /data-volume/postgresql-data
+    - /data-volume/redis-data
+    - /data-volume/certs-data
+    - /data-volume/gitlab-data
+
+- name: Render stack and config files
+  ansible.builtin.template:
+    src: "{{ repo_root }}/{{ item.src }}"
+    dest: "{{ deploy_root }}/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: "compose/gitlab.yml", dest: "compose/gitlab.yml" }
+    - { src: "compose/traefik.yml", dest: "compose/traefik.yml" }
+    - { src: "compose/redis.yml", dest: "compose/redis.yml" }
+    - { src: "compose/postgrers.yml", dest: "compose/postgrers.yml" }
+    - { src: "traefik/config.yml", dest: "traefik/config.yml" }
+    - { src: "envs/gitlab.env", dest: "envs/gitlab.env" }
+    - { src: "envs/db_postgres.env", dest: "envs/db_postgres.env" }
+    - { src: "gitlab_runner/config.toml", dest: "gitlab_runner/config.toml" }
+
+- name: Copy postgres init script
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/postgres/init.sql"
+    dest: "{{ deploy_root }}/postgres/init.sql"
+    mode: "0644"
+
+- name: Check Docker Swarm status
+  ansible.builtin.command:
+    cmd: "docker info --format '{{'{{'}}.Swarm.LocalNodeState{{'}}'}}'"
+  register: swarm_state
+  changed_when: false
+
+- name: Initialize Docker Swarm if needed
+  ansible.builtin.command:
+    cmd: docker swarm init
+  when: swarm_state.stdout != 'active'
+
+- name: Ensure swarm networks exist
+  ansible.builtin.command:
+    cmd: "docker network ls --format '{{'{{'}}.Name{{'}}'}}'"
+  register: existing_networks
+  changed_when: false
+
+- name: Create swarm networks (if missing)
+  ansible.builtin.command:
+    cmd: "docker network create --driver overlay {{ item }}"
+  loop: "{{ swarm_networks }}"
+  when: item not in existing_networks.stdout_lines
+
+- name: Remove existing stacks (optional)
+  ansible.builtin.command:
+    cmd: "docker stack rm {{ item }}"
+  loop:
+    - gitlab
+    - postgres
+    - redis
+  register: stack_remove
+  failed_when: false
+  changed_when: "'Nothing found' not in (stack_remove.stderr | default(''))"
+  when: remove_stacks_on_deploy | bool
+
+- name: Deploy gitlab stack
+  ansible.builtin.command:
+    cmd: "docker stack deploy -c {{ deploy_root }}/compose/gitlab.yml gitlab"
+
+- name: Deploy traefik stack
+  ansible.builtin.command:
+    cmd: "docker stack deploy -c {{ deploy_root }}/compose/traefik.yml traefik"
+
+- name: Deploy postgres stack
+  ansible.builtin.command:
+    cmd: "docker stack deploy -c {{ deploy_root }}/compose/postgrers.yml postgres"
+
+- name: Deploy redis stack
+  ansible.builtin.command:
+    cmd: "docker stack deploy -c {{ deploy_root }}/compose/redis.yml redis"

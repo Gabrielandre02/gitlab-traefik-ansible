@@ -1,0 +1,142 @@
+- name: Select Vagrant settings for current architecture
+  ansible.builtin.set_fact:
+    vagrant_arch: "{{ ansible_facts['architecture'] }}"
+    vagrant_box_effective: "{{ vagrant_box | default(vagrant_box_by_arch[ansible_facts['architecture']]) }}"
+    vagrant_provider_effective: "{{ vagrant_provider | default(vagrant_provider_by_arch[ansible_facts['architecture']]) }}"
+    vagrant_private_network_enabled_effective: "{{ vagrant_private_network_enabled | default(vagrant_private_network_enabled_by_arch[ansible_facts['architecture']]) }}"
+    vagrant_private_network_type_effective: "{{ vagrant_private_network_type | default(vagrant_private_network_type_by_arch[ansible_facts['architecture']]) }}"
+
+- name: Validate Vagrant settings for architecture
+  ansible.builtin.assert:
+    that:
+      - vagrant_box_effective is defined
+      - vagrant_provider_effective is defined
+      - vagrant_private_network_enabled_effective is defined
+      - vagrant_private_network_type_effective is defined
+    fail_msg: "No Vagrant box/provider configured for {{ vagrant_arch }}. Update ansible/vars/main.yml."
+
+- name: Check existing VirtualBox VMs
+  ansible.builtin.command:
+    cmd: VBoxManage list vms
+  register: vbox_vms
+  changed_when: false
+  when: vagrant_provider_effective == 'virtualbox'
+
+- name: Check Vagrant machine status
+  ansible.builtin.command:
+    cmd: "vagrant status --machine-readable {{ vagrant_machine_name }}"
+    chdir: "{{ vagrant_dir }}"
+  register: vagrant_status_raw
+  changed_when: false
+
+- name: Parse Vagrant machine status
+  ansible.builtin.set_fact:
+    vagrant_state: "{{ (vagrant_status_raw.stdout | regex_findall(',state,([^\\n]+)') | first | default('unknown')) }}"
+
+- name: Fail if VM exists outside Vagrant state
+  ansible.builtin.fail:
+    msg: "VM '{{ vagrant_machine_name }}' exists in VirtualBox but not in Vagrant state. Run 'make destroy' to clean it."
+  when:
+    - vagrant_provider_effective == 'virtualbox'
+    - vbox_vms.stdout is search('\"' ~ vagrant_machine_name ~ '\"')
+    - vagrant_state in ['not_created', 'unknown']
+
+- name: Bring up Vagrant VM (first attempt)
+  ansible.builtin.command:
+    cmd: vagrant up
+    chdir: "{{ vagrant_dir }}"
+  environment:
+    VAGRANT_BOX: "{{ vagrant_box_effective }}"
+    VAGRANT_VM_NAME: "{{ vagrant_vm_name }}"
+    VAGRANT_MACHINE_NAME: "{{ vagrant_machine_name }}"
+    VAGRANT_MEMORY: "{{ vagrant_memory }}"
+    VAGRANT_CPUS: "{{ vagrant_cpus }}"
+    VAGRANT_IP: "{{ vagrant_ip }}"
+    VAGRANT_PROVIDER: "{{ vagrant_provider_effective }}"
+    VAGRANT_DEFAULT_PROVIDER: "{{ vagrant_provider_effective }}"
+    VAGRANT_PRIVATE_NETWORK_ENABLED: "{{ '1' if vagrant_private_network_enabled_effective else '0' }}"
+    VAGRANT_PRIVATE_NETWORK_TYPE: "{{ vagrant_private_network_type_effective }}"
+  args:
+    creates: "{{ vagrant_dir }}/.vagrant/machines/{{ vagrant_machine_name }}/{{ vagrant_provider_effective }}/id"
+  register: vagrant_up_attempt
+  failed_when: false
+
+- name: Wait for Vagrant to report running state
+  ansible.builtin.command:
+    cmd: "vagrant status --machine-readable {{ vagrant_machine_name }}"
+    chdir: "{{ vagrant_dir }}"
+  register: vagrant_status
+  retries: 10
+  delay: 3
+  until: vagrant_status.stdout is search(',state,running')
+  changed_when: false
+
+- name: Fail if Vagrant up failed for another reason
+  ansible.builtin.fail:
+    msg: "Vagrant up failed: {{ vagrant_up_attempt.stderr | default(vagrant_up_attempt.stdout) }}. If a stale VM exists, run 'make destroy'."
+  when:
+    - vagrant_up_attempt.rc != 0
+
+- name: Read Vagrant SSH config
+  ansible.builtin.command:
+    cmd: "vagrant ssh-config {{ vagrant_machine_name }}"
+    chdir: "{{ vagrant_dir }}"
+  register: vagrant_ssh_config
+  changed_when: false
+  retries: 10
+  delay: 3
+  until: vagrant_ssh_config.rc == 0
+  failed_when: vagrant_ssh_config.rc != 0
+
+- name: Parse Vagrant SSH config
+  ansible.builtin.set_fact:
+    vagrant_ssh_host: "{{ (vagrant_ssh_config.stdout | default('') | regex_findall('(?m)^\\s*HostName\\s+(.+)$') | first | default('')) }}"
+    vagrant_ssh_port: "{{ (vagrant_ssh_config.stdout | default('') | regex_findall('(?m)^\\s*Port\\s+(.+)$') | first | default('')) }}"
+    vagrant_ssh_user: "{{ (vagrant_ssh_config.stdout | default('') | regex_findall('(?m)^\\s*User\\s+(.+)$') | first | default('')) }}"
+    vagrant_ssh_key: "{{ (vagrant_ssh_config.stdout | default('') | regex_findall('(?m)^\\s*IdentityFile\\s+(.+)$') | first | default('')) }}"
+
+- name: Validate Vagrant SSH config
+  ansible.builtin.assert:
+    that:
+      - vagrant_ssh_host | length > 0
+      - vagrant_ssh_port | length > 0
+      - vagrant_ssh_user | length > 0
+      - vagrant_ssh_key | length > 0
+    fail_msg: "Unable to parse Vagrant SSH config."
+
+- name: Wait for SSH to become available
+  ansible.builtin.wait_for:
+    host: "{{ vagrant_ssh_host }}"
+    port: "{{ vagrant_ssh_port | int }}"
+    timeout: 300
+    delay: 2
+
+- name: Read VM private IP
+  ansible.builtin.command:
+    cmd: "vagrant ssh {{ vagrant_machine_name }} -c \"hostname -I | awk '{print $1}'\""
+    chdir: "{{ vagrant_dir }}"
+  register: vagrant_vm_ip
+  changed_when: false
+
+- name: Show VM private IP
+  ansible.builtin.debug:
+    msg: "VM private IP: {{ vagrant_vm_ip.stdout | trim }}"
+
+- name: Update Ansible inventory with Vagrant SSH settings
+  ansible.builtin.copy:
+    dest: "{{ inventory_path }}"
+    mode: "0644"
+    content: |
+      all:
+        children:
+          gitlab_hosts:
+            hosts:
+              gitlab01:
+                ansible_host: {{ vagrant_ssh_host }}
+                ansible_port: {{ vagrant_ssh_port }}
+                ansible_user: {{ vagrant_ssh_user }}
+                ansible_ssh_private_key_file: {{ vagrant_ssh_key }}
+          vagrant_host:
+            hosts:
+              localhost:
+                ansible_connection: local
