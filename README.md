@@ -2,6 +2,21 @@
 
 This repository provides a lab to run GitLab and Traefik on Docker Swarm using Vagrant for the VM and Ansible for provisioning and deployment.
 
+![Docker Swarm](https://img.shields.io/badge/Docker_Swarm-2496ED?style=flat-square) ![Traefik](https://img.shields.io/badge/Traefik-24A1C1?style=flat-square) ![GitLab](https://img.shields.io/badge/GitLab-FC6D26?style=flat-square) ![Ansible](https://img.shields.io/badge/Ansible-EE0000?style=flat-square) ![Vagrant](https://img.shields.io/badge/Vagrant-1868F2?style=flat-square)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    user([Browser]) -->|HTTPS| traefik[Traefik]
+    subgraph vm [Vagrant VM - Docker Swarm]
+        traefik --> gitlab[GitLab]
+        gitlab --> postgres[(PostgreSQL)]
+        gitlab --> redis[(Redis)]
+    end
+    ansible[Ansible] -. provisions and deploys .-> vm
+```
+
 ## Structure
 
 - compose/ : Docker Swarm stacks (gitlab, traefik, postgres, redis)
